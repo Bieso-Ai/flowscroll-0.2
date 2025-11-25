@@ -1,36 +1,56 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Safe environment access that works in both Vite (browser) and Node environments
-// Prevents "ReferenceError: process is not defined" crashes
-const getEnvVar = (key: string, viteKey: string): string => {
-    try {
-        // Check import.meta.env (Vite)
-        if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
-            const val = (import.meta as any).env[viteKey];
-            if (val) return val;
-        }
-    } catch (e) {}
+// --- HELPER: Explicit Environment Access ---
+// We must access process.env.VARIABLE_NAME explicitly so Vite's build process
+// can statically replace these strings with the actual values.
+// Dynamic access like process.env[key] DOES NOT WORK in Vite.
 
-    try {
-        // Check process.env (Node/Webpack)
-        if (typeof process !== 'undefined' && process.env) {
-            const val = process.env[key];
-            if (val) return val;
-        }
-    } catch (e) {}
+let envUrl = '';
+let envKey = '';
 
-    return '';
+try {
+    // 1. Try Vite's import.meta.env (standard way)
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+        envUrl = import.meta.env.VITE_SUPABASE_URL || '';
+        envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    }
+} catch (e) {}
+
+try {
+    // 2. Try process.env replacement (configured in vite.config.ts define)
+    // We check for the string "process.env.SUPABASE_URL" explicitly
+    if (!envUrl && typeof process !== 'undefined' && process.env) {
+        // @ts-ignore
+        envUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+        // @ts-ignore
+        envKey = process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+    }
+} catch (e) {}
+
+// --- LOCAL STORAGE OVERRIDE ---
+// Allow users to input keys manually if env vars are missing
+let storageUrl = '';
+let storageKey = '';
+if (typeof window !== 'undefined') {
+    storageUrl = localStorage.getItem('flowscroll_sb_url') || '';
+    storageKey = localStorage.getItem('flowscroll_sb_key') || '';
+}
+
+// --- FINAL CONFIG ---
+const supabaseUrl = storageUrl || envUrl || 'https://placeholder.supabase.co';
+const supabaseKey = storageKey || envKey || 'placeholder';
+
+export const supabase = createClient(supabaseUrl, supabaseKey);
+
+export const isSupabaseConfigured = () => {
+    return !!supabaseUrl && 
+           supabaseUrl !== 'https://placeholder.supabase.co' && 
+           !!supabaseKey && 
+           supabaseKey !== 'placeholder';
 };
 
-const supabaseUrl = getEnvVar('SUPABASE_URL', 'VITE_SUPABASE_URL');
-const supabaseKey = getEnvVar('SUPABASE_KEY', 'VITE_SUPABASE_ANON_KEY');
-
-// Fallback to avoid crash if keys are missing.
-// createClient throws an error if the URL is empty, so we provide a placeholder.
-// The app will load, but Duel Mode will show connection errors instead of a white screen.
-const validUrl = supabaseUrl || 'https://placeholder.supabase.co';
-const validKey = supabaseKey || 'placeholder';
-
-export const supabase = createClient(validUrl, validKey);
-
-export const isSupabaseConfigured = () => !!supabaseUrl && !!supabaseKey;
+export const saveSupabaseConfig = (url: string, key: string) => {
+    localStorage.setItem('flowscroll_sb_url', url);
+    localStorage.setItem('flowscroll_sb_key', key);
+    window.location.reload();
+};
